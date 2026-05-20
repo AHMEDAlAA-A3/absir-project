@@ -205,6 +205,7 @@ tempCodeRunnerFile.py
 
 # Ruff stuff:
 .ruff_cache/
+.get
 
 # PyPI configuration file
 .pypirc
@@ -225,3 +226,5 @@ venv/
 __pycache__/
 *.zip
 *.mp4
+
+uploads/
