@@ -16,11 +16,12 @@ from ai.assistant_logic import (
 if not GROQ_API_KEY or not GROQ_API_KEY.strip():
     raise ValueError("GROQ_API_KEY not found in .env")
 client = Groq(api_key=GROQ_API_KEY.strip())
-_sys = ABSIRSystem()
-_object_det = _sys.object_detector
-_text_reader = _sys.text_reader
-_color_rec = _sys.color_recognizer
-_currency_det = _sys.currency_detector
+_system = None
+def _get_system():
+    global _system
+    if _system is None:
+        _system = ABSIRSystem()
+    return _system
 def _is_dark(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     return gray.mean() < 25
@@ -72,7 +73,7 @@ async def ask(query: str, session_id: str, frame: np.ndarray | None = None):
     vision_context = ""
     h, w = frame.shape[:2]
     if intent == "object":
-        result = await loop.run_in_executor(None, _object_det.detect_frame, frame)
+        result = await loop.run_in_executor(None, _get_system().object_detector.detect_frame, frame)
         detections = result[1] if result else []
         vision_context = (
             "الأشياء الظاهرة: "
@@ -81,23 +82,23 @@ async def ask(query: str, session_id: str, frame: np.ndarray | None = None):
             else "لم يتم اكتشاف عناصر واضحة."
         )
     elif intent == "text":
-        result = await loop.run_in_executor(None, _text_reader.read_image, frame)
+        result = await loop.run_in_executor(None, _get_system().text_reader.read_image, frame)
         text = (result or {}).get("text", "")
         extra["text"] = text
         vision_context = f"النص الموجود: {text[:300]}" if text.strip() else "لا يوجد نص واضح."
     elif intent == "color":
-        result = await loop.run_in_executor(None, _color_rec.detect_dominant_color, frame)
+        result = await loop.run_in_executor(None, _get_system().color_recognizer.detect_dominant_color, frame)
         color = (result or {}).get("color_ar", "غير معروف")
         extra["color"] = color
         vision_context = f"اللون الغالب: {color}"
     elif intent == "currency":
-        result = await loop.run_in_executor(None, _currency_det.detect_currency, frame)
+        result = await loop.run_in_executor(None, _get_system().currency_detector.detect_currency, frame)
         detections = (result or {}).get("detections", [])
         vision_context = (result or {}).get("message", "")
     elif intent in ("scene", "unknown"):
-        obj_task = loop.run_in_executor(None, _object_det.detect_frame, frame)
-        txt_task = loop.run_in_executor(None, _text_reader.read_image, frame)
-        col_task = loop.run_in_executor(None, _color_rec.detect_dominant_color, frame)
+        obj_task = loop.run_in_executor(None, _get_system().object_detector.detect_frame, frame)
+        txt_task = loop.run_in_executor(None, _get_system().text_reader.read_image, frame)
+        col_task = loop.run_in_executor(None, _get_system().color_recognizer.detect_dominant_color, frame)
         obj_r, txt_r, col_r = await asyncio.gather(obj_task, txt_task, col_task)
         parts = []
         if obj_r and obj_r[1]:

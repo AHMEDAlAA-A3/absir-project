@@ -12,7 +12,13 @@ class AlarmSystem:
         self._init_audio()
     def _init_audio(self):
         try:
-            if os.getenv("PYTHON_ENV") == "production":
+            _is_prod = (
+                os.getenv("PYTHON_ENV", "").strip().lower() == "production" 
+                or os.getenv("RENDER") == "true" 
+                or "RAILWAY_ENVIRONMENT_ID" in os.environ
+                or "RAILWAY_PROJECT_ID" in os.environ
+            )
+            if _is_prod:
                 self._pygame_ok = False
                 return
                 

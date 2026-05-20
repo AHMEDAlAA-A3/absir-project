@@ -27,11 +27,13 @@ else:
         print("[ABSIR] Groq client ready.")
     except Exception as e:
         warnings.warn(f"Groq init failed: {e}", RuntimeWarning)
-_sys = ABSIRSystem()
-_object_det = _sys.object_detector
-_text_reader = _sys.text_reader
-_color_rec = _sys.color_recognizer
-_currency_det = _sys.currency_detector
+_system = None
+def _get_system():
+    global _system
+    if _system is None:
+        from absir_system import ABSIRSystem
+        _system = ABSIRSystem()
+    return _system
 def _is_dark(frame):
     if frame is None or frame.size == 0:
         return True
@@ -118,7 +120,7 @@ async def ask(query: str, session_id: str, frame: np.ndarray | None = None):
                     return build_low_quality_response()
                 _, frame_w = frame.shape[:2]
                 if intent == "object":
-                    result = await asyncio.to_thread(_object_det.detect_frame, frame)
+                    result = await asyncio.to_thread(_get_system().object_detector.detect_frame, frame)
                     detections = result[1] if result and len(result) > 1 else []
                     if detections:
                         vision_context = "الأشياء الظاهرة: " + ", ".join(
@@ -127,27 +129,27 @@ async def ask(query: str, session_id: str, frame: np.ndarray | None = None):
                     else:
                         vision_context = "لم يتم اكتشاف عناصر واضحة."
                 elif intent == "text":
-                    result = await asyncio.to_thread(_text_reader.read_image, frame)
+                    result = await asyncio.to_thread(_get_system().text_reader.read_image, frame)
                     if result and isinstance(result, dict):
                         text = result.get("text") or ""
                         extra["text"] = text
                         vision_context = f"النص الموجود: {text[:300]}" if text.strip() else "لا يوجد نص واضح."
                 elif intent == "color":
-                    result = await asyncio.to_thread(_color_rec.detect_dominant_color, frame)
+                    result = await asyncio.to_thread(_get_system().color_recognizer.detect_dominant_color, frame)
                     if result and isinstance(result, dict):
                         color_name = result.get("color_ar", "غير معروف")
                         extra["color"] = color_name
                         vision_context = f"اللون الغالب: {color_name}"
                 elif intent == "currency":
-                    result = await asyncio.to_thread(_currency_det.detect_currency, frame)
+                    result = await asyncio.to_thread(_get_system().currency_detector.detect_currency, frame)
                     if result and isinstance(result, dict):
                         detections = result.get("detections", [])
                         vision_context = f"نتيجة كشف العملة: {result.get('message', '')}"
                 else:
                     obj_r, txt_r, col_r = await asyncio.gather(
-                        asyncio.to_thread(_object_det.detect_frame, frame),
-                        asyncio.to_thread(_text_reader.read_image, frame),
-                        asyncio.to_thread(_color_rec.detect_dominant_color, frame),
+                        asyncio.to_thread(_get_system().object_detector.detect_frame, frame),
+                        asyncio.to_thread(_get_system().text_reader.read_image, frame),
+                        asyncio.to_thread(_get_system().color_recognizer.detect_dominant_color, frame),
                     )
                     parts = []
                     if obj_r and len(obj_r) > 1 and obj_r[1]:
