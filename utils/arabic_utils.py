@@ -1,27 +1,22 @@
 """
 utils/arabic_utils.py
-
 Fix summary:
   - arabic_reshaper ONLY  →  correct (connects letters, font handles RTL)
   - get_display           →  WRONG  (reverses the string, causes mirroring)
   - anchor="ra"           →  right-align so text doesn't spill left of box
 """
-
 try:
     import arabic_reshaper
     ARABIC_OK = True
 except Exception:
     ARABIC_OK = False
-
 try:
     from PIL import Image, ImageDraw, ImageFont
     PIL_OK = True
 except Exception:
     PIL_OK = False
-
 import cv2
 import numpy as np
-
 _FONT_CANDIDATES = [
     "C:/Windows/Fonts/arial.ttf",
     "C:/Windows/Fonts/tahoma.ttf",
@@ -30,10 +25,7 @@ _FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
     "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
 ]
-
 _font_cache: dict = {}
-
-
 def _get_font(size: int):
     if size in _font_cache:
         return _font_cache[size]
@@ -47,8 +39,6 @@ def _get_font(size: int):
     f = ImageFont.load_default()
     _font_cache[size] = f
     return f
-
-
 def prepare_arabic(text: str) -> str:
     """
     reshape ONLY — connects Arabic letters correctly.
@@ -61,8 +51,6 @@ def prepare_arabic(text: str) -> str:
         return arabic_reshaper.reshape(text)
     except Exception:
         return text
-
-
 def put_arabic_text(
     img: np.ndarray,
     text: str,
@@ -73,23 +61,20 @@ def put_arabic_text(
 ) -> np.ndarray:
     """
     Draw Arabic text on an OpenCV frame.
-
     position = (x, y)
       align="right"  →  x is the RIGHT edge  (recommended for Arabic)
       align="left"   →  x is the LEFT  edge
     """
     prepared = prepare_arabic(text)
-
     if not PIL_OK:
         cv2.putText(img, text, position, cv2.FONT_HERSHEY_SIMPLEX,
                     0.6, color, 2, cv2.LINE_AA)
         return img
-
     try:
         pil  = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
         draw = ImageDraw.Draw(pil)
         font = _get_font(font_size)
-        fill = (color[2], color[1], color[0])   # BGR → RGB
+        fill = (color[2], color[1], color[0])   
         x, y = position
         anchor = "ra" if align == "right" else "la"
         draw.text((x, y), prepared, font=font, fill=fill, anchor=anchor)
@@ -97,10 +82,7 @@ def put_arabic_text(
     except Exception:
         cv2.putText(img, text, position, cv2.FONT_HERSHEY_SIMPLEX,
                     0.6, color, 2, cv2.LINE_AA)
-
     return img
-
-
 def measure_arabic_text(text: str, font_size: int = 22) -> tuple[int, int]:
     """Returns (width, height) in pixels."""
     if not PIL_OK:

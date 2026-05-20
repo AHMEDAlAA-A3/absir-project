@@ -1,71 +1,41 @@
-"""
-detectors/color_blind.py
-Color Vision Assistance System
-
-Supports 3 types of color blindness:
-  - protanopia   (red-blind)
-  - deuteranopia (green-blind)
-  - tritanopia   (blue-blind)
-
-For each type:
-  1. Simulate   — show what the image looks like to that person
-  2. Correct    — transform image to colors they CAN distinguish
-  3. Report     — dominant colors before & after
-"""
 
 import cv2
 import numpy as np
 from collections import Counter
-
-
-# ── Simulation matrices (LMS color space) ───────────────────────────
-# These matrices simulate how each type of color blindness perceives color.
-# Source: Machado et al. (2009) IEEE TVCG
-
 _SIM = {
     "protanopia": np.array([
         [0.152286, 1.052583, -0.204868],
         [0.114503, 0.786281,  0.099216],
         [-0.003882, -0.048116, 1.051998],
     ], dtype=np.float32),
-
     "deuteranopia": np.array([
         [0.367322, 0.860646, -0.227968],
         [0.280085, 0.672501,  0.047413],
         [-0.011820, 0.042940,  0.968881],
     ], dtype=np.float32),
-
     "tritanopia": np.array([
         [1.255528, -0.076749, -0.178779],
         [-0.078411,  0.930809,  0.147602],
         [0.004733,  0.691367,  0.303900],
     ], dtype=np.float32),
 }
-
-# ── Correction matrices ──────────────────────────────────────────────
-# Shift confusable colors into distinguishable channels.
-
 _CORRECT = {
     "protanopia": np.array([
         [0.0,  2.0, -1.0],
         [0.0,  1.0,  0.0],
         [0.0,  0.0,  1.0],
     ], dtype=np.float32),
-
     "deuteranopia": np.array([
         [1.0,  0.0,  0.0],
         [0.5,  0.0,  0.5],
         [0.0,  0.0,  1.0],
     ], dtype=np.float32),
-
     "tritanopia": np.array([
         [1.0,  0.0,  0.0],
         [0.0,  1.0,  0.0],
         [-0.5, 0.5,  0.0],
     ], dtype=np.float32),
 }
-
-# ── Named color map ──────────────────────────────────────────────────
 _COLOR_NAMES = {
     "أحمر":      ([0, 120, 70],  [10, 255, 255]),
     "برتقالي":   ([11, 100, 100], [25, 255, 255]),
@@ -76,30 +46,21 @@ _COLOR_NAMES = {
     "بنفسجي":    ([131, 50, 50], [160, 255, 255]),
     "وردي":      ([161, 50, 50], [179, 255, 255]),
 }
-
-# What each type struggles with (shown to user)
 _STRUGGLE = {
     "protanopia":   "لا يرى الأحمر جيداً",
     "deuteranopia": "لا يرى الأخضر جيداً",
     "tritanopia":   "لا يرى الأزرق جيداً",
 }
-
 TYPES = list(_SIM.keys())
-
-
 def _apply_matrix(frame: np.ndarray, matrix: np.ndarray) -> np.ndarray:
     """Apply a 3×3 color transform matrix to a BGR frame."""
     img = frame.astype(np.float32) / 255.0
-    # BGR → RGB for matrix
     img = img[:, :, ::-1]
     h, w = img.shape[:2]
     flat = img.reshape(-1, 3) @ matrix.T
     flat = np.clip(flat, 0, 1)
     result = flat.reshape(h, w, 3)
-    # RGB → BGR
     return (result[:, :, ::-1] * 255).astype(np.uint8)
-
-
 def _dominant_colors(frame: np.ndarray, top: int = 5) -> list[str]:
     """Return list of dominant color names (Arabic) in a frame."""
     hsv    = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -114,39 +75,19 @@ def _dominant_colors(frame: np.ndarray, top: int = 5) -> list[str]:
         {"name": n, "percent": round(c / total * 100, 1)}
         for n, c in found.most_common(top)
     ]
-
-
 def process(frame: np.ndarray, cb_type: str) -> dict:
-    """
-    Full color blindness assistance pipeline.
-
-    Returns:
-      {
-        "type":             "protanopia",
-        "struggle":         "لا يرى الأحمر جيداً",
-        "original_colors":  [...],
-        "corrected_colors": [...],
-        "simulated_b64":    "<base64 jpg>",   # how they see original
-        "corrected_b64":    "<base64 jpg>",   # corrected for them
-      }
-    """
     if cb_type not in _SIM:
         cb_type = "protanopia"
-
     sim_matrix  = _SIM[cb_type]
     cor_matrix  = _CORRECT[cb_type]
-
     simulated  = _apply_matrix(frame, sim_matrix)
     corrected  = _apply_matrix(frame, cor_matrix)
-
     orig_colors = _dominant_colors(frame)
     corr_colors = _dominant_colors(corrected)
-
     def to_b64(img):
         _, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 82])
         import base64
         return base64.b64encode(buf).decode()
-
     return {
         "type":             cb_type,
         "struggle":         _STRUGGLE[cb_type],

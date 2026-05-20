@@ -1,75 +1,173 @@
 from ultralytics import YOLO
-from utils.drawing import draw_corner_box, draw_label_box
-from utils.voice import VoiceEngine
+from utils.drawing import (
+    draw_corner_box,
+    draw_label_box,
+)
 import cv2
-import time
-
-
+import torch
+import traceback
+import threading
+import numpy as np
 class ObjectDetector:
     AR_OBJECTS = {
-        "person": "شخص", "car": "سيارة", "bicycle": "عجلة",
-        "motorcycle": "موتوسيكل", "bus": "اوتوبيس", "truck": "شاحنة",
-        "chair": "كرسي", "couch": "كنبة", "bed": "سرير",
-        "dining table": "طاولة", "laptop": "لابتوب", "mouse": "ماوس",
-        "keyboard": "كيبورد", "cell phone": "موبايل", "bottle": "زجاجة",
-        "cup": "كوب", "fork": "شوكة", "knife": "سكينة",
-        "spoon": "معلقة", "bowl": "طبق", "banana": "موزة",
-        "apple": "تفاحة", "orange": "برتقانة", "book": "كتاب",
-        "scissors": "مقص", "backpack": "شنطة", "handbag": "حقيبة",
-        "tie": "كرافتة", "umbrella": "شمسية", "remote": "ريموت",
-        "tv": "تلفزيون", "monitor": "شاشة",
+        "person": "شخص",
+        "car": "سياره",
+        "bicycle": "عجله",
+        "motorcycle": "موتوسيكل",
+        "bus": "اتوبيس",
+        "truck": "شاحنه",
+        "chair": "كرسي",
+        "couch": "كنبه",
+        "bed": "سرير",
+        "dining table": "طاوله",
+        "laptop": "لابتوب",
+        "mouse": "ماوس",
+        "keyboard": "كيبورد",
+        "cell phone": "موبايل",
+        "bottle": "زجاجه",
+        "cup": "كوبايه",
+        "fork": "شوكه",
+        "knife": "سكينه",
+        "spoon": "معلقه",
+        "bowl": "طبق",
+        "banana": "موزه",
+        "apple": "تفاحه",
+        "orange": "برتقاله",
+        "book": "كتاب",
+        "scissors": "مقص",
+        "backpack": "شنطه",
+        "handbag": "حقيبه",
+        "tie": "كرافته",
+        "umbrella": "شمسيه",
+        "remote": "ريموت",
+        "tv": "تلفزيون",
+        "monitor": "شاشه",
+        "cat": "قطه",
+        "dog": "كلب",
     }
-
-    def __init__(self, model_path: str, conf: float = 0.4):
-        self.model              = YOLO(model_path)
-        self.conf               = conf
-        self.voice              = VoiceEngine()
-        self.last_spoken_objects: set = set()
-        self.last_speak_time    = 0.0
-        self.speak_interval     = 5.0
-        self.font               = cv2.FONT_HERSHEY_SIMPLEX
-        self._last_results      = []
-
-    def detect_frame(self, frame):
-        results         = self.model(frame, conf=self.conf, verbose=False)
-        self._last_results = results
-        detected_objects: set = set()
-        annotated_frame = frame.copy()
-        raw_detections  = []
-
-        for r in results:
-            for box in r.boxes:
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
-                cls     = int(box.cls[0])
-                conf    = float(box.conf[0])
-                name_en = self.model.names[cls]
-                name_ar = self.AR_OBJECTS.get(name_en, name_en)
-                detected_objects.add(name_ar)
-                raw_detections.append({
-                    "name_en": name_en, "name_ar": name_ar,
-                    "confidence": round(conf, 2),
-                    "bbox": {"x1": x1, "y1": y1, "x2": x2, "y2": y2},
-                })
-
-                annotated_frame = draw_corner_box(
-                    annotated_frame, x1, y1, x2, y2, color=(255, 80, 80), thickness=2
+    def __init__(
+        self,
+        model_path: str,
+        conf: float = 0.45,
+        iou: float = 0.5,
+        max_det: int = 15,
+    ):
+        self.conf = conf
+        self.iou = iou
+        self.max_det = max_det
+        self._lock = threading.Lock()
+        self.model = YOLO(model_path)
+        self.device = (
+            "cuda"
+            if torch.cuda.is_available()
+            else "cpu"
+        )
+        self.model.to(self.device)
+        self._last_results = []
+        print(
+            f"[ObjectDetector] Loaded on {self.device}"
+        )
+    def detect_frame(
+        self,
+        frame: np.ndarray,
+    ):
+        if frame is None:
+            return None, []
+        try:
+            frame = np.ascontiguousarray(frame)
+            with self._lock:
+                results = self.model.predict(
+                    source=frame,
+                    conf=self.conf,
+                    iou=self.iou,
+                    max_det=self.max_det,
+                    verbose=False,
+                    device=self.device,
                 )
-                draw_label_box(annotated_frame, name_en, name_ar, x1, y1, x2,
-                               box_color=(255, 80, 80))
-
-        now = time.time()
-        if detected_objects:
-            time_passed     = (now - self.last_speak_time) >= self.speak_interval
-            objects_changed = detected_objects != self.last_spoken_objects
-            if time_passed or objects_changed:
-                items = list(detected_objects)[:3]
-                msg   = f"شايف {items[0]}" if len(items) == 1 else "شايف " + " و ".join(items)
-                self.voice.speak(msg)
-                self.last_spoken_objects = detected_objects.copy()
-                self.last_speak_time     = now
-            return annotated_frame, raw_detections
-
-        return None, []
-
+            self._last_results = results
+            annotated = frame.copy()
+            detections = []
+            seen = set()
+            for r in results:
+                if r.boxes is None:
+                    continue
+                for box in r.boxes:
+                    try:
+                        cls = int(box.cls[0])
+                        conf = float(box.conf[0])
+                        x1, y1, x2, y2 = map(
+                            int,
+                            box.xyxy[0]
+                        )
+                        name_en = (
+                            self.model.names[cls]
+                        )
+                        name_ar = (
+                            self.AR_OBJECTS.get(
+                                name_en,
+                                name_en
+                            )
+                        )
+                        unique_key = (
+                            name_en,
+                            x1 // 20,
+                            y1 // 20,
+                        )
+                        if unique_key in seen:
+                            continue
+                        seen.add(unique_key)
+                        detection = {
+                            "name_en": name_en,
+                            "name_ar": name_ar,
+                            "confidence": round(
+                                conf,
+                                2
+                            ),
+                            "bbox": {
+                                "x1": x1,
+                                "y1": y1,
+                                "x2": x2,
+                                "y2": y2,
+                            },
+                        }
+                        detections.append(
+                            detection
+                        )
+                        color = (
+                            255,
+                            200,
+                            0,
+                        )
+                        annotated = draw_corner_box(
+                            annotated,
+                            x1,
+                            y1,
+                            x2,
+                            y2,
+                            color=color,
+                            thickness=2,
+                        )
+                        draw_label_box(
+                            annotated,
+                            name_en,
+                            name_ar,
+                            x1,
+                            y1,
+                            x2,
+                            box_color=color,
+                        )
+                    except Exception:
+                        traceback.print_exc()
+            detections.sort(
+                key=lambda d: d["confidence"],
+                reverse=True,
+            )
+            return annotated, detections
+        except Exception:
+            traceback.print_exc()
+            return None, []
     def get_last_results(self):
-        return self._last_results, self.model.names
+        return (
+            self._last_results,
+            self.model.names,
+        )

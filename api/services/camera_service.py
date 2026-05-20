@@ -5,48 +5,32 @@ Safe release on shutdown via lifespan.
 """
 import cv2
 import threading
-
-
+from config.settings import CAMERA_INDEX, CAMERA_WIDTH, CAMERA_HEIGHT
 class CameraService:
     _instance = None
     _lock     = threading.Lock()
-
     def __new__(cls):
         with cls._lock:
             if cls._instance is None:
                 obj = super().__new__(cls)
-                obj._cap      = None
                 obj._cam_lock = threading.Lock()
                 cls._instance = obj
         return cls._instance
-
-    def open(self, index: int = 0, width: int = 640, height: int = 480):
-        with self._cam_lock:
-            if self._cap and self._cap.isOpened():
-                return True
-            self._cap = cv2.VideoCapture(index)
-            self._cap.set(cv2.CAP_PROP_FRAME_WIDTH,  width)
-            self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-            self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            return self._cap.isOpened()
-
     def capture(self):
-        """Grab one frame. Returns numpy array or None."""
+        """Grab one frame by opening the camera, taking the picture, and closing it."""
         with self._cam_lock:
-            if not self._cap or not self._cap.isOpened():
+            cap = cv2.VideoCapture(CAMERA_INDEX)
+            if not cap.isOpened():
                 return None
-            ret, frame = self._cap.read()
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  CAMERA_WIDTH)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAMERA_HEIGHT)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            for _ in range(3):
+                cap.read()
+            ret, frame = cap.read()
+            cap.release()
             return frame if ret else None
-
-    def release(self):
-        with self._cam_lock:
-            if self._cap and self._cap.isOpened():
-                self._cap.release()
-                self._cap = None
-
     @property
     def is_open(self) -> bool:
-        return bool(self._cap and self._cap.isOpened())
-
-
+        return False
 camera = CameraService()

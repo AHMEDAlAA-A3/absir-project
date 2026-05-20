@@ -2,18 +2,14 @@ import time
 import threading
 import os
 import numpy as np
-
-
 class AlarmSystem:
     ALARM_PATH = os.path.join(os.path.dirname(__file__), "..", "assets", "alarm.wav")
-
     def __init__(self, cooldown=3.0):
         self.cooldown = cooldown
         self._last_alarm = 0.0
         self._lock = threading.Lock()
         self._pygame_ok = False
         self._init_audio()
-
     def _init_audio(self):
         try:
             import pygame
@@ -24,7 +20,6 @@ class AlarmSystem:
             self._custom_sound = pygame.mixer.Sound(alarm_path) if os.path.exists(alarm_path) else None
         except Exception:
             self._pygame_ok = False
-
     def _make_beep(self, freq=880, duration=0.4, volume=0.8):
         import pygame
         sample_rate = 44100
@@ -35,7 +30,6 @@ class AlarmSystem:
         envelope = np.minimum(t / 0.01, 1.0) * np.minimum((duration - t) / 0.05, 1.0)
         wave = (wave * envelope * volume * 32767).astype(np.int16)
         return pygame.sndarray.make_sound(wave)
-
     def trigger(self, severity="danger"):
         if severity == "safe":
             return
@@ -45,7 +39,6 @@ class AlarmSystem:
                 return
             self._last_alarm = now
         threading.Thread(target=self._play, daemon=True).start()
-
     def _play(self):
         try:
             if self._pygame_ok:
@@ -57,7 +50,6 @@ class AlarmSystem:
                 self._fallback_beep()
         except Exception as e:
             print(f"[Alarm] {e}")
-
     @staticmethod
     def _fallback_beep():
         try:

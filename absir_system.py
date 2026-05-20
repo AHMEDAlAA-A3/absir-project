@@ -1,115 +1,77 @@
-import cv2
-from detectors.object_detector   import ObjectDetector
-from detectors.currency_detector  import CurrencyDetector
-from detectors.color_recognizer   import ColorRecognizer
-from detectors.text_reader        import TextReader
-from utils.danger_alert           import DangerAlert
-from config.settings import (
-    OBJECTS_MODEL_PATH, CURRENCY_MODEL_PATH, DANGER_COOLDOWN
-)
-
-
+import traceback
+import threading
+from detectors.object_detector import ObjectDetector
+from detectors.currency_detector import CurrencyDetector
+from detectors.color_recognizer import ColorRecognizer
+from detectors.text_reader import TextReader
+from utils.danger_alert import DangerAlert
+from config.settings import OBJECTS_MODEL_PATH, CURRENCY_MODEL_PATH, DANGER_COOLDOWN
 class ABSIRSystem:
+    _instance = None
+    _lock = threading.Lock()
+    def __new__(cls):
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super().__new__(cls)
+        return cls._instance
     def __init__(self):
-        print("Loading ABSIR System...")
-        self.object_detector   = ObjectDetector(OBJECTS_MODEL_PATH)
-        self.currency_detector = CurrencyDetector(CURRENCY_MODEL_PATH)
-        self.color_recognizer  = ColorRecognizer()
-        self.text_reader       = TextReader()
-        self.danger_alert      = DangerAlert(cooldown=DANGER_COOLDOWN)
-        print("ABSIR Ready!")
-
-    # ------------------------------------------------------------------
-    # IMAGE MODE  →  returns clean JSON-safe dict
-    # ------------------------------------------------------------------
-    def process_image(self, image_path: str, mode: str = "auto") -> dict:
-        frame = cv2.imread(image_path)
-        if frame is None:
-            return {"status": "error", "message": "Cannot read image"}
-
-        if mode == "currency":
-            result = self.currency_detector.detect_currency(frame)
-            return {"status": "success", "mode": "currency",
-                    "result": result or {}, "danger": None}
-
-        if mode == "object":
-            _, detections = self.object_detector.detect_frame(frame)
-            danger = self.danger_alert.process(
-                self.object_detector._last_results,
-                self.object_detector.model.names,
-                frame.shape
-            )
-            return {"status": "success", "mode": "object",
-                    "detections": detections, "danger": danger}
-
-        if mode == "text":
-            result = self.text_reader.read_image(frame)
-            return {"status": "success", "mode": "text",
-                    "result": result or {}, "danger": None}
-
-        if mode == "color":
-            result = self.color_recognizer.detect_dominant_color(image_path)
-            return {"status": "success", "mode": "color",
-                    "result": result, "danger": None}
-
-        # AUTO
-        result = self.currency_detector.detect_currency(frame)
-        if result:
-            return {"status": "success", "mode": "currency",
-                    "result": result, "danger": None}
-
-        _, detections = self.object_detector.detect_frame(frame)
-        if detections:
-            danger = self.danger_alert.process(
-                self.object_detector._last_results,
-                self.object_detector.model.names,
-                frame.shape
-            )
-            return {"status": "success", "mode": "object",
-                    "detections": detections, "danger": danger}
-
-        result = self.text_reader.read_image(frame)
-        if result:
-            return {"status": "success", "mode": "text",
-                    "result": result, "danger": None}
-
-        result = self.color_recognizer.detect_dominant_color(image_path)
-        return {"status": "success", "mode": "color",
-                "result": result, "danger": None}
-
-    # ------------------------------------------------------------------
-    # FRAME MODE  →  always returns (annotated_frame, detections, danger)
-    # ------------------------------------------------------------------
-    def process_frame(self, frame, mode: str = "auto"):
-        """
-        Returns: (annotated_frame, detections: list, danger: dict | None)
-        annotated_frame is always a valid numpy array.
-        """
-        if frame is None:
-            return frame, [], None
-
-        if mode == "currency":
-            ann, raw = self.currency_detector.detect_frame(frame)
-            return (ann if ann is not None else frame), raw, None
-
-        if mode == "object":
+        if getattr(self, "_initialized", False):
+            return
+        self._initialized = True
+        self._ocr_lock = threading.Lock()
+        print("\n[ABSIR] Initializing system...\n")
+        try:
+            self.object_detector = ObjectDetector(OBJECTS_MODEL_PATH)
+            self.currency_detector = CurrencyDetector(CURRENCY_MODEL_PATH)
+            self.color_recognizer = ColorRecognizer()
+            self.danger_alert = DangerAlert(cooldown=DANGER_COOLDOWN)
+            self._text_reader = None
+            print("[ABSIR] System ready.")
+        except Exception:
+            traceback.print_exc()
+            raise RuntimeError("ABSIR initialization failed")
+    @property
+    def text_reader(self):
+        if self._text_reader is None:
+            with self._ocr_lock:
+                if self._text_reader is None:
+                    print("[ABSIR] Loading OCR...")
+                    self._text_reader = TextReader()
+        return self._text_reader
+    def analyze_danger(self, frame_shape):
+        try:
+            last_results, names = self.object_detector.get_last_results()
+            return self.danger_alert.process(last_results, names, frame_shape)
+        except Exception:
+            traceback.print_exc()
+            return None
+    def process_frame(self, frame, mode="auto"):
+        try:
+            if frame is None:
+                return None, [], None
+            if mode == "object":
+                ann, raw = self.object_detector.detect_frame(frame)
+                danger = self.analyze_danger(frame.shape)
+                return ann if ann is not None else frame, raw, danger
+            elif mode == "currency":
+                ann, raw = self.currency_detector.detect_frame(frame)
+                return ann if ann is not None else frame, raw, None
+            elif mode == "text":
+                res = self.text_reader.read_image(frame)
+                if res:
+                    return res.get("annotated_frame", frame), [res], None
+                return frame, [], None
+            elif mode == "color":
+                result = self.color_recognizer.detect_dominant_color(frame)
+                return frame, result or [], None
             ann, raw = self.object_detector.detect_frame(frame)
-            danger   = self.danger_alert.process(
-                self.object_detector._last_results,
-                self.object_detector.model.names,
-                frame.shape
-            )
-            return (ann if ann is not None else frame), raw, danger
-
-        # AUTO  (currency → object; text is image-only)
-        ann, raw = self.currency_detector.detect_frame(frame)
-        if ann is not None:
-            return ann, raw, None
-
-        ann, raw = self.object_detector.detect_frame(frame)
-        danger   = self.danger_alert.process(
-            self.object_detector._last_results,
-            self.object_detector.model.names,
-            frame.shape
-        )
-        return (ann if ann is not None else frame), raw, danger
+            if raw:
+                danger = self.analyze_danger(frame.shape)
+                return ann, raw, danger
+            ann, raw = self.currency_detector.detect_frame(frame)
+            if raw:
+                return ann, raw, None
+            return frame, [], None
+        except Exception:
+            traceback.print_exc()
+            return frame, [], None

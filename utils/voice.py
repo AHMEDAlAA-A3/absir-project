@@ -1,142 +1,122 @@
-import threading
-import queue
-import time
 import os
-import platform
-
-
+import time
+import queue
+import base64
+import asyncio
+import tempfile
+import threading
+import traceback
+import edge_tts
+try:
+    import pygame
+    pygame.mixer.init(frequency=22050, size=-16, channels=2, buffer=512)
+    _PYGAME_OK = True
+except Exception:
+    _PYGAME_OK = False
 class VoiceEngine:
-    """
-    Single shared queue across all instances — no overlap, no parallel speech.
-    Uses gTTS + playsound on Windows (most reliable for Arabic).
-    Falls back to pyttsx3, then print.
-    """
-    _shared_queue  = queue.Queue(maxsize=5)
-    _shared_lock   = threading.Lock()
-    _last_said: dict = {}
+    _shared_queue = queue.Queue(maxsize=5)
+    _shared_lock = threading.Lock()
+    _last_said = {}
     _worker_active = False
-    _engine_cache  = None
-
-    def __init__(self, lang="ar", repeat_gap=5.0):
-        self.lang       = lang
+    _mute = False
+    def __init__(self, lang="ar", repeat_gap=3.0):
+        self.lang = lang
         self.repeat_gap = repeat_gap
         with VoiceEngine._shared_lock:
-            if VoiceEngine._engine_cache is None:
-                VoiceEngine._engine_cache = self._init_engine()
             if not VoiceEngine._worker_active:
                 VoiceEngine._worker_active = True
                 t = threading.Thread(target=self._worker, daemon=True)
                 t.start()
-
-    def _init_engine(self):
-        # 1. gTTS — best Arabic quality, works on Windows without extra setup
-        try:
-            from gtts import gTTS
-            import playsound as _ps
-            return "gtts"
-        except Exception:
-            pass
-        # 2. pyttsx3
-        try:
-            import pyttsx3
-            eng = pyttsx3.init()
-            eng.setProperty("rate", 145)
-            voices = eng.getProperty("voices")
-            for v in voices:
-                name = (v.name or "").lower()
-                vid  = (v.id  or "").lower()
-                if "arabic" in name or "ar-" in vid or "\\ar\\" in vid:
-                    eng.setProperty("voice", v.id)
-                    break
-            return ("pyttsx3", eng)
-        except Exception:
-            pass
-        return "print"
-
-    # ------------------------------------------------------------------
-    def speak(self, text: str):
+    def _get_voice(self):
+        return "ar-EG-ShakirNeural" if self.lang == "ar" else "en-US-AriaNeural"
+    async def to_audio_b64(self, text):
         if not text or not text.strip():
+            return None
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+                tmp_path = f.name
+            communicate = edge_tts.Communicate(text=text, voice=self._get_voice())
+            await communicate.save(tmp_path)
+            with open(tmp_path, "rb") as f:
+                return base64.b64encode(f.read()).decode()
+        except Exception:
+            traceback.print_exc()
+            return None
+        finally:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+    def speak(self, text):
+        if VoiceEngine._mute or not text:
+            return
+        text = text.strip()
+        if not text:
             return
         now = time.time()
         with VoiceEngine._shared_lock:
-            if now - VoiceEngine._last_said.get(text, 0) < self.repeat_gap:
+            last = VoiceEngine._last_said.get(text, 0)
+            if now - last < self.repeat_gap:
                 return
             VoiceEngine._last_said[text] = now
         try:
             VoiceEngine._shared_queue.put_nowait(text)
         except queue.Full:
-            pass
-
-    def clear_queue(self):
-        while not VoiceEngine._shared_queue.empty():
             try:
                 VoiceEngine._shared_queue.get_nowait()
-            except queue.Empty:
-                break
-        with VoiceEngine._shared_lock:
-            VoiceEngine._last_said.clear()
-
-    def stop(self):
-        pass
-
-    # ------------------------------------------------------------------
+                VoiceEngine._shared_queue.put_nowait(text)
+            except Exception:
+                pass
+    @classmethod
+    def set_mute(cls, mute):
+        with cls._shared_lock:
+            cls._mute = mute
     def _worker(self):
         while True:
             try:
                 text = VoiceEngine._shared_queue.get(timeout=0.5)
-                self._say(text)
+                self._play_tts(text)
             except queue.Empty:
                 continue
-            except Exception as e:
-                print(f"[VoiceWorker] {e}")
-
-    def _say(self, text: str):
-        engine = VoiceEngine._engine_cache
+            except Exception:
+                traceback.print_exc()
+    def _play_tts(self, text):
+        tmp_path = None
         try:
-            if engine == "gtts":
-                self._say_gtts(text)
-            elif isinstance(engine, tuple) and engine[0] == "pyttsx3":
-                _, eng = engine
-                eng.say(text)
-                eng.runAndWait()
-            else:
-                print(f"[TTS] {text}")
-        except Exception as e:
-            print(f"[VoiceEngine._say] {e}")
-
-    def _say_gtts(self, text: str):
-        from gtts import gTTS
-        import tempfile, subprocess
-
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-            tmp = f.name
-        try:
-            tts = gTTS(text=text, lang=self.lang, slow=False)
-            tts.save(tmp)
-
-            # Windows — use playsound
-            if platform.system() == "Windows":
-                try:
-                    import playsound
-                    playsound.playsound(tmp, block=True)
-                    return
-                except Exception:
-                    pass
-                # fallback: Windows Media Player via cmd
-                try:
-                    os.startfile(tmp)
-                    time.sleep(3)
-                    return
-                except Exception:
-                    pass
-
-            # Linux/Mac — ffplay
-            subprocess.run(
-                ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", tmp],
-                check=False
-            )
-        finally:
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+                tmp_path = f.name
+            loop = asyncio.new_event_loop()
             try:
-                os.unlink(tmp)
+                async def _gen():
+                    comm = edge_tts.Communicate(text=text, voice=self._get_voice())
+                    await comm.save(tmp_path)
+                loop.run_until_complete(_gen())
+            finally:
+                loop.close()
+            self._play_file(tmp_path)
+        except Exception:
+            traceback.print_exc()
+        finally:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
+    def _play_file(self, path):
+        if _PYGAME_OK:
+            try:
+                pygame.mixer.music.load(path)
+                pygame.mixer.music.play()
+                while pygame.mixer.music.get_busy():
+                    time.sleep(0.05)
+                pygame.mixer.music.unload()
+                return
             except Exception:
                 pass
+        try:
+            from playsound import playsound
+            playsound(path, block=True)
+        except Exception:
+            pass

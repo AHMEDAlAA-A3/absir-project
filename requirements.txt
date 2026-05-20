@@ -1,16 +1,30 @@
+# fastapi & server
 fastapi==0.111.0
-uvicorn[standard]==0.29.0
+uvicorn[standard]~=0.46.0
 python-multipart==0.0.9
-pydantic==2.7.1
-opencv-python-headless==4.9.0.80
-ultralytics==8.2.0
-pytesseract==0.3.10
-arabic-reshaper==3.0.0
-python-bidi==0.4.2
-Pillow==10.3.0
+pydantic~=2.13.0
+
+# vision & ML
+opencv-python~=4.8.1.78
+ultralytics~=8.4.37
+torch~=2.11.0
 numpy==1.26.4
+
+# OCR
+pytesseract~=0.3.13
+arabic-reshaper==3.0.0
+python-bidi~=0.6.7
+Pillow~=12.2.0
+
+# AI
+groq~=1.2.0
+
+# voice
+edge-tts~=7.0.0
+pygame-ce
+
+# utils
 python-dotenv==1.0.1
-pyttsx3==2.90
-gtts==2.5.1
-pygame==2.5.2
+protobuf~=5.29.6
+pydub~=0.25.1
 websockets==12.0
