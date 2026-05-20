@@ -27,8 +27,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy project files
 COPY . .
 
-# Expose port for FastAPI
-EXPOSE 8000
+# Expose port for FastAPI (7860 is required for Hugging Face Spaces)
+EXPOSE 7860
 
 # Run with Gunicorn using Uvicorn workers for production
-CMD ["gunicorn", "api.main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--timeout", "120"]
+CMD ["gunicorn", "api.main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:7860", "--timeout", "120"]

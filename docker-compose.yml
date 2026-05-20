@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile
     container_name: absir_backend
     ports:
-      - "8000:8000"
+      - "8000:7860"
     environment:
       - GROQ_API_KEY=${GROQ_API_KEY}
       # Add other environment variables here if needed
