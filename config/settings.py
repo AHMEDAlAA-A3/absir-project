@@ -6,11 +6,11 @@ load_dotenv()
 BASE_DIR = Path(__file__).parent.parent
 CURRENCY_MODEL_PATH = os.getenv(
     "CURRENCY_MODEL_PATH",
-    "D:/Study/FinalGraduationProject/Egypt banknote.v1i.yolov8/ABSIR/yolov8_from_scratch_gpu4/weights/best.pt"
+    str(BASE_DIR / "models" / "best.pt")
 )
 OBJECTS_MODEL_PATH = os.getenv(
     "OBJECTS_MODEL_PATH",
-    "D:/Study/FinalGraduationProject/DataSet/Data/yolov8l.pt"
+    str(BASE_DIR / "models" / "yolov8l.pt")
 )
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", "8000"))
