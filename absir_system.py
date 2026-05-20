@@ -19,17 +19,39 @@ class ABSIRSystem:
             return
         self._initialized = True
         self._ocr_lock = threading.Lock()
-        print("\n[ABSIR] Initializing system...\n")
+        self._obj_lock = threading.Lock()
+        self._curr_lock = threading.Lock()
+        
+        self._object_detector = None
+        self._currency_detector = None
+        self._text_reader = None
+        
+        print("\n[ABSIR] System initialized (Models lazy-loaded)...\n")
         try:
-            self.object_detector = ObjectDetector(OBJECTS_MODEL_PATH)
-            self.currency_detector = CurrencyDetector(CURRENCY_MODEL_PATH)
             self.color_recognizer = ColorRecognizer()
             self.danger_alert = DangerAlert(cooldown=DANGER_COOLDOWN)
-            self._text_reader = None
-            print("[ABSIR] System ready.")
         except Exception:
             traceback.print_exc()
             raise RuntimeError("ABSIR initialization failed")
+
+    @property
+    def object_detector(self):
+        if self._object_detector is None:
+            with self._obj_lock:
+                if self._object_detector is None:
+                    print("[ABSIR] Loading Object Detector (YOLO)...")
+                    self._object_detector = ObjectDetector(OBJECTS_MODEL_PATH)
+        return self._object_detector
+
+    @property
+    def currency_detector(self):
+        if self._currency_detector is None:
+            with self._curr_lock:
+                if self._currency_detector is None:
+                    print("[ABSIR] Loading Currency Detector (YOLO)...")
+                    self._currency_detector = CurrencyDetector(CURRENCY_MODEL_PATH)
+        return self._currency_detector
+
     @property
     def text_reader(self):
         if self._text_reader is None:

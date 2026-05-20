@@ -12,6 +12,10 @@ class AlarmSystem:
         self._init_audio()
     def _init_audio(self):
         try:
+            if os.getenv("PYTHON_ENV") == "production":
+                self._pygame_ok = False
+                return
+                
             import pygame
             pygame.mixer.init(frequency=44100, size=-16, channels=1, buffer=512)
             self._pygame_ok = True

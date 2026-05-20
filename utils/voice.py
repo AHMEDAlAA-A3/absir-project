@@ -8,9 +8,12 @@ import threading
 import traceback
 import edge_tts
 try:
-    import pygame
-    pygame.mixer.init(frequency=22050, size=-16, channels=2, buffer=512)
-    _PYGAME_OK = True
+    if os.getenv("PYTHON_ENV") == "production":
+        _PYGAME_OK = False
+    else:
+        import pygame
+        pygame.mixer.init(frequency=22050, size=-16, channels=2, buffer=512)
+        _PYGAME_OK = True
 except Exception:
     _PYGAME_OK = False
 class VoiceEngine:
